@@ -1,0 +1,17 @@
+{
+  "name": "doors-report-bot",
+  "version": "1.0.0",
+  "description": "Discord bot that posts Roblox bug reports and manages status/bans via Open Cloud DataStore",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -40,7 +40,9 @@ const STATUS_COLORS = {
   Rejected: 0xed4245,
 };
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
+});
 
 function fmtDuration(mins) {
   if (!mins || mins <= 0) return "permanent";
@@ -414,6 +416,35 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.isRepliable()) {
       interaction.reply({ content: "Something went wrong.", ephemeral: true }).catch(() => {});
     }
+  }
+});
+
+client.on("messageDelete", async (message) => {
+  try {
+    if (message.channelId !== CHANNEL_ID) return;
+    let index;
+    try {
+      index = await getEntry(INDEX_DS, INDEX_KEY);
+    } catch {
+      return;
+    }
+    if (!Array.isArray(index)) return;
+    for (const entry of index) {
+      let report;
+      try {
+        report = await getEntry(REPORTS_DS, entry.id);
+      } catch {
+        continue;
+      }
+      if (report && report.MessageId === message.id) {
+        report.Deleted = true;
+        await setEntry(REPORTS_DS, report.Id, report);
+        console.log("[delete] report hidden from player:", report.Id);
+        break;
+      }
+    }
+  } catch (err) {
+    console.error("[messageDelete] error:", err.message);
   }
 });
 

@@ -16,6 +16,16 @@ const TOKEN = process.env.DISCORD_TOKEN;
 const CHANNEL_ID = process.env.REPORT_CHANNEL_ID;
 const POLL_SECONDS = parseInt(process.env.POLL_SECONDS || "15", 10);
 
+const ADMIN_IDS = (process.env.ADMIN_IDS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter((s) => s.length > 0);
+
+function isAdmin(userId) {
+  if (ADMIN_IDS.length === 0) return true; // if not configured, allow (avoids lockout)
+  return ADMIN_IDS.includes(userId);
+}
+
 const REPORTS_DS = "BugReports_V1";
 const INDEX_DS = "BugReportsIndex_V1";
 const BANS_DS = "BugBans_V1";
@@ -237,6 +247,14 @@ async function refreshAll() {
 
 client.on("interactionCreate", async (interaction) => {
   try {
+    if (
+      (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit()) &&
+      !isAdmin(interaction.user.id)
+    ) {
+      await interaction.reply({ content: "You are not allowed to use these controls.", ephemeral: true });
+      return;
+    }
+
     // Status select
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith("setstatus:")) {
       const reportId = interaction.customId.split(":")[1];

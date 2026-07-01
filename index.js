@@ -22,7 +22,7 @@ const ADMIN_IDS = (process.env.ADMIN_IDS || "")
   .filter((s) => s.length > 0);
 
 function isAdmin(userId) {
-  if (ADMIN_IDS.length === 0) return true; // if not configured, allow (avoids lockout)
+  if (ADMIN_IDS.length === 0) return true;
   return ADMIN_IDS.includes(userId);
 }
 
@@ -43,7 +43,7 @@ const STATUS_LABELS = {
   Rejected: "Rejected",
 };
 const STATUS_COLORS = {
-  Pending: 0x4f545c,
+  Pending: 0x5865f2,
   Accepted: 0x3ba55d,
   InProgress: 0xe6a23c,
   Fixed: 0x4a9eed,
@@ -56,60 +56,87 @@ const client = new Client({
 
 function fmtDuration(mins) {
   if (!mins || mins <= 0) return "permanent";
-  if (mins < 60) return `${mins} min`;
-  if (mins < 1440) return `${(mins / 60).toFixed(mins % 60 === 0 ? 0 : 1)} h`;
-  return `${(mins / 1440).toFixed(mins % 1440 === 0 ? 0 : 1)} d`;
+  if (mins < 60) return mins + " min";
+  if (mins < 1440) return (mins / 60).toFixed(mins % 60 === 0 ? 0 : 1) + " h";
+  return (mins / 1440).toFixed(mins % 1440 === 0 ? 0 : 1) + " d";
+}
+
+function isBanActive(ban) {
+  if (!ban || ban.Active !== true) return false;
+  if (!ban.Until || ban.Until <= 0) return true; // permanent
+  return ban.Until > Math.floor(Date.now() / 1000);
 }
 
 function genId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
+function pad(label, val) {
+  return String(label).padEnd(11) + String(val);
+}
+
 function reportEmbed(report) {
   const color = STATUS_COLORS[report.Status] || STATUS_COLORS.Pending;
   const stats = report.Stats || {};
+  const statusLabel = STATUS_LABELS[report.Status] || report.Status || "Pending";
+  const profile = "https://www.roblox.com/users/" + report.UserId + "/profile";
 
-  const player =
-    `[${report.DisplayName}](https://www.roblox.com/users/${report.UserId}/profile) ` +
-    `\`@${report.Username}\`\n` +
-    `\`${report.UserId}\` · ${report.AccountAge}d old`;
+  const NL = "\n";
+  const FENCE = "```";
+
+  const identity =
+    "**[" + report.DisplayName + "](" + profile + ")**  `@" + report.Username + "`" + NL +
+    "-# ID " + report.UserId + "  ·  account " + report.AccountAge + "d old";
 
   const statsBlock =
-    "```\n" +
-    `Wins        ${stats.Wins || 0}\n` +
-    `Deaths      ${stats.Deaths || 0}\n` +
-    `Knobs       ${stats.Knobs || 0}\n` +
-    `Revives     ${stats.Revives || 0}\n` +
-    `TrollBoost  ${stats.TrollBoost || 0}\n` +
-    "```";
+    FENCE + NL +
+    pad("Wins", stats.Wins || 0) + NL +
+    pad("Deaths", stats.Deaths || 0) + NL +
+    pad("Knobs", stats.Knobs || 0) + NL +
+    pad("Revives", stats.Revives || 0) + NL +
+    pad("TrollBoost", stats.TrollBoost || 0) + NL +
+    FENCE;
 
   const cosmeticsBlock =
-    "```\n" +
-    `Plush   ${stats.EquippedPlush || "None"}\n` +
-    `Badge   ${stats.EquippedBadge || "None"}\n` +
-    `Owned   ${stats.OwnedPlush || 0}\n` +
-    `Plush?  ${stats.HasPlush ? "Yes" : "No"}\n` +
-    "```";
+    FENCE + NL +
+    pad("Plush", stats.EquippedPlush || "None") + NL +
+    pad("Badge", stats.EquippedBadge || "None") + NL +
+    pad("Owned", stats.OwnedPlush || 0) + NL +
+    pad("HasPlush", stats.HasPlush ? "Yes" : "No") + NL +
+    FENCE;
 
   const e = new EmbedBuilder()
     .setColor(color)
-    .setAuthor({
-      name: `${report.DisplayName} · ${STATUS_LABELS[report.Status] || report.Status}`,
-      url: `https://www.roblox.com/users/${report.UserId}/profile`,
-    })
-    .setTitle(report.Title || "Bug Report")
-    .addFields(
-      { name: "Player", value: player, inline: true },
-      { name: "Context", value: `${report.Mode || "-"}\n${report.Type || "-"}`, inline: true },
-      { name: "\u200b", value: "\u200b", inline: false },
-      { name: "Description", value: String(report.Description || "-").slice(0, 1024), inline: false },
-    );
+    .setAuthor({ name: statusLabel.toUpperCase() + " · BUG REPORT" })
+    .setTitle(report.Title || "Untitled report")
+    .setThumbnail(
+      "https://www.roblox.com/headshot-thumbnail/image?userId=" +
+        report.UserId +
+        "&width=150&height=150&format=png",
+    )
+    .setDescription(identity);
+
+  e.addFields(
+    { name: "Mode", value: "`" + (report.Mode || "-") + "`", inline: true },
+    { name: "Type", value: "`" + (report.Type || "-") + "`", inline: true },
+    { name: "Reported", value: "<t:" + (report.Time || 0) + ":R>", inline: true },
+  );
+
+  e.addFields({
+    name: "Description",
+    value: String(report.Description || "-").slice(0, 1024),
+    inline: false,
+  });
 
   if (report.Steps && report.Steps !== "-") {
-    e.addFields({ name: "Steps", value: String(report.Steps).slice(0, 1024), inline: false });
+    e.addFields({
+      name: "Steps to reproduce",
+      value: String(report.Steps).slice(0, 1024),
+      inline: false,
+    });
   }
   if (report.Video && report.Video !== "" && report.Video !== "-") {
-    e.addFields({ name: "Video", value: `[Watch clip](${report.Video})`, inline: false });
+    e.addFields({ name: "Clip", value: "**[Watch the recording](" + report.Video + ")**", inline: false });
   }
 
   e.addFields(
@@ -119,33 +146,31 @@ function reportEmbed(report) {
 
   if (report.DataEdit) {
     const ed = report.DataEdit;
-    const applied = ed.Applied ? "applied" : "pending (applies on next join / within 10s if online)";
+    const state = ed.Applied ? "applied" : "pending";
     const changes = EDITABLE.filter((k) => ed.Values && ed.Values[k] !== undefined)
-      .map((k) => `${k}: ${ed.Values[k]}`)
-      .join(", ");
-    e.addFields({ name: "Data edit", value: `${changes}\n_${applied}_ · by ${ed.By}`, inline: false });
+      .map((k) => k + " -> " + ed.Values[k])
+      .join("  ·  ");
+    e.addFields({ name: "Data edited", value: changes + NL + "-# " + state + " · by " + ed.By, inline: false });
   }
 
-  if (report.Ban && report.Ban.Active) {
+  if (isBanActive(report.Ban)) {
     e.addFields({
-      name: "Ban",
-      value: `Banned ${fmtDuration(report.Ban.Minutes)} by ${report.Ban.BannedBy}\nReason: ${report.Ban.Reason}`,
+      name: "Ban active",
+      value: "**" + fmtDuration(report.Ban.Minutes) + "** · by " + report.Ban.BannedBy + NL + "Reason: " + report.Ban.Reason,
       inline: false,
     });
   }
 
-  if (report.StatusNote && report.StatusNote !== "") {
-    e.setFooter({ text: `${report.StatusNote} · ID ${report.Id}` });
-  } else {
-    e.setFooter({ text: `ID ${report.Id}` });
-  }
-  e.setTimestamp(new Date((report.Time || 0) * 1000));
+  const footerBits = ["ID " + report.Id];
+  if (report.StatusNote && report.StatusNote !== "") footerBits.unshift(report.StatusNote);
+  e.setFooter({ text: footerBits.join("  ·  ") });
+
   return e;
 }
 
 function controlRows(report) {
   const select = new StringSelectMenuBuilder()
-    .setCustomId(`setstatus:${report.Id}`)
+    .setCustomId("setstatus:" + report.Id)
     .setPlaceholder("Set status...")
     .addOptions(
       STATUSES.map((s) => ({
@@ -156,13 +181,13 @@ function controlRows(report) {
     );
   const row1 = new ActionRowBuilder().addComponents(select);
 
-  const banned = report.Ban && report.Ban.Active;
+  const banned = isBanActive(report.Ban);
   const banBtn = new ButtonBuilder()
-    .setCustomId(banned ? `unban:${report.Id}` : `ban:open:${report.Id}`)
+    .setCustomId(banned ? "unban:" + report.Id : "ban:open:" + report.Id)
     .setLabel(banned ? "Unban author" : "Ban author")
     .setStyle(banned ? ButtonStyle.Secondary : ButtonStyle.Danger);
   const editBtn = new ButtonBuilder()
-    .setCustomId(`editdata:${report.Id}`)
+    .setCustomId("editdata:" + report.Id)
     .setLabel("Change Data")
     .setStyle(ButtonStyle.Primary);
   const row2 = new ActionRowBuilder().addComponents(editBtn, banBtn);
@@ -245,6 +270,34 @@ async function refreshAll() {
   console.log("[refresh] done");
 }
 
+async function syncExpiredBans() {
+  let index;
+  try {
+    index = await getEntry(INDEX_DS, INDEX_KEY);
+  } catch {
+    return;
+  }
+  if (!Array.isArray(index)) return;
+  for (const entry of index) {
+    let report;
+    try {
+      report = await getEntry(REPORTS_DS, entry.id);
+    } catch {
+      continue;
+    }
+    if (!report || !report.Posted || !report.MessageId) continue;
+    // Ban recorded as active but time expired -> refresh card so button flips back to Ban
+    if (report.Ban && report.Ban.Active === true && report.Ban.Until && report.Ban.Until > 0) {
+      if (report.Ban.Until <= Math.floor(Date.now() / 1000)) {
+        report.Ban.Active = false;
+        await setEntry(REPORTS_DS, report.Id, report);
+        await editMessage(report);
+        console.log("[bansync] expired ban refreshed:", report.Id);
+      }
+    }
+  }
+}
+
 client.on("interactionCreate", async (interaction) => {
   try {
     if (
@@ -255,7 +308,6 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    // Status select
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith("setstatus:")) {
       const reportId = interaction.customId.split(":")[1];
       const status = interaction.values[0];
@@ -265,14 +317,13 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
       report.Status = status;
-      report.StatusNote = `${STATUS_LABELS[status]} by ${interaction.user.username}`;
+      report.StatusNote = STATUS_LABELS[status] + " by " + interaction.user.username;
       await setEntry(REPORTS_DS, reportId, report);
       await editMessage(report);
-      await interaction.reply({ content: `Status -> **${STATUS_LABELS[status]}**`, ephemeral: true });
+      await interaction.reply({ content: "Status -> **" + STATUS_LABELS[status] + "**", ephemeral: true });
       return;
     }
 
-    // Change Data -> modal prefilled with current stats
     if (interaction.isButton() && interaction.customId.startsWith("editdata:")) {
       const reportId = interaction.customId.split(":")[1];
       const report = await getEntry(REPORTS_DS, reportId);
@@ -281,7 +332,7 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
       const s = report.Stats || {};
-      const modal = new ModalBuilder().setCustomId(`editmodal:${reportId}`).setTitle("Change player data");
+      const modal = new ModalBuilder().setCustomId("editmodal:" + reportId).setTitle("Change player data");
       const inputs = [
         ["Wins", s.Wins || 0],
         ["Deaths", s.Deaths || 0],
@@ -305,7 +356,6 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    // Change Data modal submit
     if (interaction.isModalSubmit() && interaction.customId.startsWith("editmodal:")) {
       const reportId = interaction.customId.split(":")[1];
       const report = await getEntry(REPORTS_DS, reportId);
@@ -314,7 +364,7 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
       const values = {};
-      const newStats = { ...(report.Stats || {}) };
+      const newStats = Object.assign({}, report.Stats || {});
       for (const key of EDITABLE) {
         const raw = interaction.fields.getTextInputValue(key);
         const n = parseInt(raw, 10);
@@ -340,19 +390,15 @@ client.on("interactionCreate", async (interaction) => {
       await editMessage(report);
 
       const summary = EDITABLE.filter((k) => values[k] !== undefined)
-        .map((k) => `${k}=${values[k]}`)
+        .map((k) => k + "=" + values[k])
         .join(", ");
-      await interaction.reply({
-        content: `Data edit queued for **${report.Username}**: ${summary}`,
-        ephemeral: true,
-      });
+      await interaction.reply({ content: "Data edit queued for **" + report.Username + "**: " + summary, ephemeral: true });
       return;
     }
 
-    // Ban -> modal
     if (interaction.isButton() && interaction.customId.startsWith("ban:open:")) {
       const reportId = interaction.customId.split(":")[2];
-      const modal = new ModalBuilder().setCustomId(`banmodal:${reportId}`).setTitle("Ban author");
+      const modal = new ModalBuilder().setCustomId("banmodal:" + reportId).setTitle("Ban author");
       const reason = new TextInputBuilder()
         .setCustomId("reason")
         .setLabel("Reason (optional)")
@@ -374,7 +420,6 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    // Ban modal submit
     if (interaction.isModalSubmit() && interaction.customId.startsWith("banmodal:")) {
       const reportId = interaction.customId.split(":")[1];
       const reasonRaw = interaction.fields.getTextInputValue("reason");
@@ -408,13 +453,12 @@ client.on("interactionCreate", async (interaction) => {
       await editMessage(report);
 
       await interaction.reply({
-        content: `Banned **${report.Username}** (${fmtDuration(mins)}). Reason: ${reason}`,
+        content: "Banned **" + report.Username + "** (" + fmtDuration(mins) + "). Reason: " + reason,
         ephemeral: true,
       });
       return;
     }
 
-    // Unban
     if (interaction.isButton() && interaction.customId.startsWith("unban:")) {
       const reportId = interaction.customId.split(":")[1];
       const report = await getEntry(REPORTS_DS, reportId);
@@ -426,7 +470,7 @@ client.on("interactionCreate", async (interaction) => {
       if (report.Ban) report.Ban.Active = false;
       await setEntry(REPORTS_DS, reportId, report);
       await editMessage(report);
-      await interaction.reply({ content: `Unbanned **${report.Username}**.`, ephemeral: true });
+      await interaction.reply({ content: "Unbanned **" + report.Username + "**.", ephemeral: true });
       return;
     }
   } catch (err) {
@@ -467,10 +511,11 @@ client.on("messageDelete", async (message) => {
 });
 
 client.once("ready", async () => {
-  console.log(`Logged in as ${client.user.tag}`);
+  console.log("Logged in as " + client.user.tag);
   await refreshAll();
   await pollReports();
   setInterval(pollReports, POLL_SECONDS * 1000);
+  setInterval(syncExpiredBans, 30 * 1000);
 });
 
 client.login(TOKEN);
